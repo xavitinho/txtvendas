@@ -6,7 +6,7 @@ const app = express();
 app.use(express.static(__dirname));
 
 app.get('/', (request, response) => {
-  response.sendFile(__dirname + '/widget.html');
+  response.sendStatus(200)
 })
 
 app.listen(process.env.PORT);
