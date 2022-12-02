@@ -3,8 +3,6 @@
 const express = require('express')
 const app = express();
 
-app.use(express.static(__dirname));
-
 app.get('/', (request, response) => {
   response.sendStatus(200)
 })
@@ -31,13 +29,12 @@ for (let membro of membros) {
     track.push(`${membro} ${termo}`)
   }
 }
-console.log(track)
 
 var stream = T.stream('statuses/filter', { track })
 stream.on('tweet', function(tweet) {
   if (!tweet.retweeted_status) {
     let text = tweet.extended_tweet 
-      ? tweet.extended_tweet.full_text.replace('https://', '') 
+      ? tweet.extended_tweet.full_text
       : tweet.text
     let skip = true
     for (let membro of membros) {
@@ -55,10 +52,9 @@ stream.on('tweet', function(tweet) {
   }
 })
 
-const putzero = n => n.toLocaleString(undefined, { minimumIntegerDigits: 2 })
-
-
 // atualiza a bio
+
+const putzero = n => n.toLocaleString(undefined, { minimumIntegerDigits: 2 })
 
 setInterval( () => {
   let t = new Date(Date.now())
@@ -66,10 +62,10 @@ setInterval( () => {
   let h  = putzero(t.getHours())
   let m  = putzero(t.getMinutes())
   let d  = putzero(t.getDate())
-  let me = putzero(t.getMonth())
+  let me = putzero(t.getMonth() + 1)
   T.post('account/update_profile', { 
     description: 
       `ativa as notificações se estiver em busca de um beomgyu R ou outro photocard raro\n\nonline ${d}/${me} às ${h}h${m}m` 
   })
   console.log(`online ${d}/${me} às ${h}h${m}m`)
-}, 600000)
+}, 300000)
