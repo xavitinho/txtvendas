@@ -1,18 +1,7 @@
-// server config 
-
-const express = require('express')
-const app = express();
-
-app.get('/', (request, response) => {
-  response.sendStatus(200)
-})
-
-app.listen(process.env.PORT);
-
-
 // twitter config
 
 const twit = require('twit')
+
 var T = new twit({
   consumer_key: process.env.CONSUMERTOKEN,
   consumer_secret: process.env.CONSUMERSECRET,
