@@ -1,60 +1,112 @@
-// twitter config
+// server config
+var status = '...'
+const express = require('express')
+const app = express();
+app.get('/', (request, response) => {
+  response.send(status)
+})
+app.listen(process.env.PORT);
 
-const twit = require('twit')
-
-var T = new twit({
-  consumer_key: process.env.CONSUMERTOKEN,
-  consumer_secret: process.env.CONSUMERSECRET,
-  access_token: process.env.ACCESSTOKEN,
-  access_token_secret: process.env.ACCESSTOKENSECRET,
-  timeout_ms: 60 * 1000,
-  strictSSL: true
+// discord config
+const { Client, GatewayIntentBits } = require('discord.js')
+const bot = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
+})
+bot.login(process.env.DISCORDTOKEN)
+var channel = false
+bot.on('ready', () => {
+  console.log('discord bot ready')
+  channel = bot.channels.cache.get('1023386548739252304')
 })
 
-const { membros, termos } = require('./filter.json')
-const track = []
-for (let membro of membros) {
-  for (let termo of termos) {
-    track.push(`${membro} ${termo}`)
+// twitter config
+const { TwitterApi, ETwitterStreamEvent } = require('twitter-api-v2');
+const client = new TwitterApi(process.env.BearerToken)
+const clientRT = new TwitterApi({
+  appKey: process.env.APIKey,
+  appSecret: process.env.APIKeySecret,
+  accessToken: process.env.AccessToken,
+  accessSecret: process.env.AccessTokenSecret
+})
+
+// atualiza as regras
+const { membros, termos, filtros, bio } = require('./config.json')
+let value = `(${membros.reduce((a, b) => a + ' OR ' + b)}) (${termos.reduce((a, b) => a + ' OR ' + b)}) -is:retweet`
+const track = [{ value }]
+
+async function checkrules() {
+  let rules = await client.v2.streamRules()
+  if (rules.data) {
+    await client.v2.updateStreamRules({
+      delete: {
+        ids: rules.data.map(rule => rule.id)
+      }
+    })
+  }
+  await client.v2.updateStreamRules({
+    add: track
+  })
+}
+
+// buscando os tweets
+async function startStream() {
+  await checkrules()
+  const stream = await client.v2.searchStream()
+  stream.on(ETwitterStreamEvent.Data, tweet => {
+    rt(tweet.data)
+  })
+  statusupdate()
+  setInterval(statusupdate, 300000)
+}
+
+//retuita
+async function rt({ text, id }) {
+  text = text.toLowerCase()
+  let skip = true
+  membros.forEach(membro => {
+    termos.forEach(termo => {
+      if (text.includes(membro.toLowerCase()) && text.includes(termo.toLowerCase())) {
+        skip = false
+      } 
+    })
+  })
+  filtros.forEach(filtro => {
+    if(text.includes(filtro.toLowerCase())) {
+      skip = true
+    }
+  })
+  if(!skip) {
+    const me = await clientRT.v2.me()
+    clientRT.v2.retweet(me.data.id, id).catch(e => { console.log(e) })
+    clientRT.v2.like(me.data.id, id).catch(e => { console.log(e) })
+    if (channel) {
+      channel.send(
+        `${text.replace('https://', '')}\n` +
+        `https://twitter.com/i/status/${tweet.id_str}`
+      )
+    }
   }
 }
 
-var stream = T.stream('statuses/filter', { track })
-stream.on('tweet', function(tweet) {
-  if (!tweet.retweeted_status) {
-    let text = tweet.extended_tweet 
-      ? tweet.extended_tweet.full_text
-      : tweet.text
-    let skip = true
-    for (let membro of membros) {
-      for (let termo of termos) {
-        if (text.includes(membro) && text.includes(termo)){
-          skip = false
-        }
-      }
-    }
-    if (!skip) {
-      console.log(`${text}\nhttps://twitter.com/i/status/${tweet.id_str}\n`)
-      T.post('statuses/retweet/:id', { id: tweet.id_str })
-      T.post('favorites/create', { screen_name: tweet.user.screen_name, id: tweet.id_str})
-    }
-  }
-})
-
-// atualiza a bio
-
-const putzero = n => n.toLocaleString(undefined, { minimumIntegerDigits: 2 })
-
-setInterval( () => {
+// atualiza o status na bio e no console
+async function statusupdate() {
+  const putzero = n => n.toLocaleString(undefined, { minimumIntegerDigits: 2 })
   let t = new Date(Date.now())
   t.setHours(t.getHours() - 3)
-  let h  = putzero(t.getHours())
-  let m  = putzero(t.getMinutes())
-  let d  = putzero(t.getDate())
+  let h = putzero(t.getHours())
+  let m = putzero(t.getMinutes())
+  let d = putzero(t.getDate())
   let me = putzero(t.getMonth() + 1)
-  T.post('account/update_profile', { 
-    description: 
-      `ativa as notificações se estiver em busca de um beomgyu R ou outro photocard raro\n\nonline ${d}/${me} às ${h}h${m}m` 
-  })
-  console.log(`online ${d}/${me} às ${h}h${m}m`)
-}, 300000)
+  status = `online ${d}/${me} às ${h}h${m}m`
+  console.log(status)
+  clientRT.v1.updateAccountProfile({
+    description: `${bio}\n\n~ ${status}`
+  }).catch(e => { console.log(e) })
+}
+
+if (value.length < 513) { startStream() }
+else { console.log('por favor, remova alguns termos') }
