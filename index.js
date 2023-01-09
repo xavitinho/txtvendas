@@ -53,6 +53,11 @@ async function checkrules() {
 }
 
 // buscando os tweets
+String.prototype.has = function(term) {   
+  term = new RegExp(`[^a-záàâãéèêíïóôõöúç]+${term.toLowerCase()}[^a-záàâãéèêíïóôõöúç]+`, 'i')
+  return term.test(` ${this.toLowerCase()} `)
+}
+
 async function startStream() {
   await checkrules()
   const stream = await client.v2.searchStream()
@@ -65,17 +70,16 @@ async function startStream() {
 
 //retuita
 async function rt({ text, id }) {
-  text = text.toLowerCase()
   let skip = true
   membros.forEach(membro => {
     termos.forEach(termo => {
-      if (text.includes(membro.toLowerCase()) && text.includes(termo.toLowerCase())) {
+      if (text.has(membro) && text.has(termo)) {
         skip = false
       } 
     })
   })
   filtros.forEach(filtro => {
-    if(text.includes(filtro.toLowerCase())) {
+    if(text.has(filtro)) {
       skip = true
     }
   })
@@ -83,10 +87,14 @@ async function rt({ text, id }) {
     const me = await clientRT.v2.me()
     clientRT.v2.retweet(me.data.id, id).catch(e => { console.log(e) })
     clientRT.v2.like(me.data.id, id).catch(e => { console.log(e) })
+    console.log(
+      `${text.replace('https://', '')}\n` +
+      `https://twitter.com/i/status/${id}`
+    )
     if (channel) {
       channel.send(
         `${text.replace('https://', '')}\n` +
-        `https://twitter.com/i/status/${tweet.id_str}`
+        `https://twitter.com/i/status/${id}`
       )
     }
   }
