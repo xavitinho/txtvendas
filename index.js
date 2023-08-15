@@ -6,8 +6,9 @@ app.get('/', (request, response) => {
   response.send(status)
 })
 app.listen(process.env.PORT);
-
+console.log(status)
 // discord config
+
 const { Client, GatewayIntentBits } = require('discord.js')
 const bot = new Client({
   intents: [
@@ -16,22 +17,30 @@ const bot = new Client({
     GatewayIntentBits.MessageContent
   ],
 })
-bot.login(process.env.DISCORDTOKEN)
+
 var channel = false
+
+bot.login(process.env.DISCORDTOKEN)
+
 bot.on('ready', () => {
-  console.log('discord bot ready')
   channel = bot.channels.cache.get('1023386548739252304')
+  channel.send(status + ': discord bot online')
 })
+
+var currentapp = 0
+
+const bearers = [ process.env.BearerToken, process.env.BearerToken2]
 
 // twitter config
 const { TwitterApi, ETwitterStreamEvent } = require('twitter-api-v2');
-const client = new TwitterApi(process.env.BearerToken)
-const clientRT = new TwitterApi({
-  appKey: process.env.APIKey,
-  appSecret: process.env.APIKeySecret,
-  accessToken: process.env.AccessToken,
-  accessSecret: process.env.AccessTokenSecret
-})
+
+var client = new TwitterApi(process.env.BearerToken)
+var clientRT = new TwitterApi({
+      appKey: process.env.APIKey,
+      appSecret: process.env.APIKeySecret,
+      accessToken: process.env.AccessToken,
+      accessSecret: process.env.AccessTokenSecret
+    })
 
 // atualiza as regras
 const { membros, termos, filtros, bio } = require('./config.json')
@@ -39,69 +48,86 @@ let value = `(${membros.reduce((a, b) => a + ' OR ' + b)}) (${termos.reduce((a, 
 const track = [{ value }]
 
 async function checkrules() {
+  let skip = false
   let rules = await client.v2.streamRules()
   if (rules.data) {
+    let rulestodelete = []
+    rules.data.map(rule => {
+      if (track[0].value == rule) { skip = true }
+      else { rulestodelete.push(rule.id) }
+    })
+    if (rulestodelete.length > 0) {
+      await client.v2.updateStreamRules({
+        delete: {
+          ids: rulestodelete
+        }
+      })
+    }
+  }
+  if (!skip) {
     await client.v2.updateStreamRules({
-      delete: {
-        ids: rules.data.map(rule => rule.id)
-      }
+      add: track
     })
   }
-  await client.v2.updateStreamRules({
-    add: track
-  })
 }
 
 // buscando os tweets
-String.prototype.has = function(term) {   
-  term = new RegExp(`[^a-záàâãéèêíïóôõöúç]+${term.toLowerCase()}[^a-záàâãéèêíïóôõöúç]+`, 'i')
+String.prototype.has = function(term) {
+  term = new RegExp(`[^0-9a-záàâãéèêíïóôõöúç@]+${term.toLowerCase()}[^0-9a-záàâãéèêíïóôõöúç@]+`, 'i')
   return term.test(` ${this.toLowerCase()} `)
 }
 
-async function startStream() {
-  await checkrules()
-  const stream = await client.v2.searchStream()
-  stream.on(ETwitterStreamEvent.Data, tweet => {
-    rt(tweet.data)
-  })
-  statusupdate()
-  setInterval(statusupdate, 300000)
+String.prototype.deleteuser = function() {
+  return (this.split(/[ \n]/).filter(word => !word.startsWith('@')).join(' '))
 }
 
 //retuita
-async function rt({ text, id }) {
+function rt(meid, { text, id }) {
+  text = text.deleteuser()
   let skip = true
   membros.forEach(membro => {
     termos.forEach(termo => {
       if (text.has(membro) && text.has(termo)) {
         skip = false
-      } 
+      }
+      // console.log(membro, termo, skip) // teste
     })
   })
   filtros.forEach(filtro => {
-    if(text.has(filtro)) {
+    if (text.has(filtro)) {
       skip = true
     }
+    // console.log(filtro, skip) // teste
   })
-  if(!skip) {
-    const me = await clientRT.v2.me()
-    clientRT.v2.retweet(me.data.id, id).catch(e => { console.log(e) })
-    clientRT.v2.like(me.data.id, id).catch(e => { console.log(e) })
-    console.log(
-      `${text.replace('https://', '')}\n` +
-      `https://twitter.com/i/status/${id}`
-    )
-    if (channel) {
-      channel.send(
-        `${text.replace('https://', '')}\n` +
-        `https://twitter.com/i/status/${id}`
-      )
-    }
+  console.log(`${text}\nhttps://twitter.com/i/status/${id}\n---------------------------------\n`) // teste
+  if (!skip) {
+    clientRT.v2.retweet(meid, id).catch(e => {
+      console.log(e)
+      if (channel) {
+        channel.send(status + ': erro ao retuitar: \n' + e)
+      }
+    })
+    //clientRT.v2.like(meid, id).catch(e => { console.log(e) })
   }
 }
 
 // atualiza o status na bio e no console
-async function statusupdate() {
+async function bioupdate() {
+  console.log('online ' + status)
+  if (channel) {
+    channel.send('online ' + status).catch(e => { console.log(e) })
+  }
+  clientRT.v1.updateAccountProfile({
+    description: `${bio}\n\n~ online ${status}`
+  }).catch(e => {
+    console.log(e)
+    if (channel) {
+      channel.send(status + ': erro ao alterar a bio: \n' + e)
+    }
+  })
+}
+
+function statusupdate() {
   const putzero = n => n.toLocaleString(undefined, { minimumIntegerDigits: 2 })
   let t = new Date(Date.now())
   t.setHours(t.getHours() - 3)
@@ -109,12 +135,51 @@ async function statusupdate() {
   let m = putzero(t.getMinutes())
   let d = putzero(t.getDate())
   let me = putzero(t.getMonth() + 1)
-  status = `online ${d}/${me} às ${h}h${m}m`
-  console.log(status)
-  clientRT.v1.updateAccountProfile({
-    description: `${bio}\n\n~ ${status}`
-  }).catch(e => { console.log(e) })
+  status = `${d}/${me} às ${h}h${m}m`
 }
 
-if (value.length < 513) { startStream() }
-else { console.log('por favor, remova alguns termos') }
+async function startStream() {
+  const id = '1424861656383897600'
+  statusupdate()
+  bioupdate()
+  statusupdate()
+  await checkrules()
+  client.v2.searchStream().then(async function (stream) {
+    console.log(currentapp + ': deu bom')
+    //stream.close();
+    stream.autoReconnect = true;
+    statusupdate()
+    bioupdate()
+    setInterval(statusupdate, 60000)
+    setInterval(bioupdate, 600000)
+    stream.on(ETwitterStreamEvent.Data, tweet => {
+      if (channel) {
+        channel.send(status + ': novo tweet')
+      }
+      rt(id, tweet.data)
+    })
+    stream.on(
+      ETwitterStreamEvent.ConnectionError,
+      err => {
+        if (channel) { channel.send(status + ': erro de conexão:\n' + err).catch(e => { console.log(e) }) }
+        stream = client.v2.searchStream()
+      }
+    )
+    stream.on(
+      ETwitterStreamEvent.ConnectionClosed,
+      () => {
+        if (channel) { channel.send(status + ': conexão encerrada???????').catch(e => { console.log(e) }) }
+        stream = client.v2.searchStream()
+      }
+    )
+  })
+  .catch( err => {
+    console.log(currentapp + ': deu ruim' + err)
+    currentapp = currentapp ? 0 : 1
+    client = new TwitterApi(apps[currentapp].bearer)
+    //clientRT = new TwitterApi(apps[currentapp].tokens)
+    startStream() 
+  })
+}
+
+startStream()
